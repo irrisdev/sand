@@ -2,14 +2,15 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"log"
 	"math"
 	"math/bits"
 	"math/rand"
 
+	"github.com/ebitengine/debugui"
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
@@ -87,6 +88,11 @@ func NewWorld(width, height int) *World {
 func (w *World) Update() {
 
 	for b := w.bs.Size - 1; b >= 0; b-- {
+
+		if w.bs.BitArr[b/w.width] == math.MaxUint64 {
+			continue
+		}
+
 		i := b
 		if !w.ltr {
 			row := b / w.width
@@ -120,14 +126,14 @@ func (w *World) Update() {
 			next = i + w.width + c
 			nr := next / w.width
 
-			if next < w.bs.Size-1 && nr == row && !w.bs.Test(next) {
+			if next < w.bs.Size && nr == row && !w.bs.Test(next) {
 				w.bs.SetClear(i, next)
 				continue
 			}
 
 			next = i + w.width + s
 			nr = next / w.width
-			if next < w.bs.Size-1 && nr == row && !w.bs.Test(next) {
+			if next < w.bs.Size && nr == row && !w.bs.Test(next) {
 				w.bs.SetClear(i, next)
 				continue
 			}
@@ -172,55 +178,56 @@ func bitsOn(x uint64) []int {
 
 	return pos
 }
-
 func (w *World) Draw(px []byte) {
-	// for i, v := range w.bs.BitArr {
-	// 	if v != 0 {
-	// 		for _, j := range bitsOn(v) {
-	// 			index := i*64 + j
-	// 			row := index / w.width
-	// 			col := index % w.width
+	for i := 0; i < len(px); i += 4 {
+		px[i] = 0
+		px[i+1] = 0
+		px[i+2] = 0
+		px[i+3] = 0
+	}
 
-	// px[row*col*4] = 0xC2
-	// px[row*col*4+1] = 0xB2
-	// px[row*col*4+2] = 0x80
-	// px[row*col*4+3] = 0xFF
-	// 		}
-	// 	}
+	// only draw particles that exist
+	for i, v := range w.bs.BitArr {
+		if v != 0 {
+			pos := bitsOn(v)
+			for _, j := range pos {
+				index := i*64 + j
 
-	// }
+				if index >= w.bs.Size {
+					continue
+				}
 
-	for i := 0; i < w.bs.Size; i++ {
-		if w.bs.Test(i) {
+				x := index % w.width
+				y := index / w.width
 
-			x := i % w.width
-			y := i / w.width
+				pixelIdx := index * 4
 
-			if (x+y)%2 == 0 {
-				// Light sand
-				px[i*4] = 0xC2
-				px[i*4+1] = 0xB2
-				px[i*4+2] = 0x80
-				px[i*4+3] = 0xFF
-			} else {
-				// Dark sand
-				px[i*4] = 0xA9
-				px[i*4+1] = 0x91
-				px[i*4+2] = 0x5F
-				px[i*4+3] = 0xFF
+				if (x+y)&1 == 0 {
+					// Light sand
+					px[pixelIdx] = 0xC2
+					px[pixelIdx+1] = 0xB2
+					px[pixelIdx+2] = 0x80
+					px[pixelIdx+3] = 0xFF
+				} else {
+					// Dark sand
+					px[pixelIdx] = 0xA9
+					px[pixelIdx+1] = 0x91
+					px[pixelIdx+2] = 0x5F
+					px[pixelIdx+3] = 0xFF
+				}
 			}
-
-		} else {
-			px[i*4] = 0
-			px[i*4+1] = 0
-			px[i*4+2] = 0
-			px[i*4+3] = 0
 		}
 	}
 }
 
 func (w *World) Fill(x int, y int) {
 	w.FillCircle(x, y, 15)
+}
+
+func (w *World) Clear() {
+	for i := range w.bs.BitArr {
+		w.bs.BitArr[i] = 0
+	}
 }
 
 type Game struct {
@@ -230,9 +237,26 @@ type Game struct {
 	// mouse position
 	mx int
 	my int
+
+	debugui   debugui.DebugUI
+	clearSand bool
 }
 
 func (g *Game) Update() error {
+
+	if _, err := g.debugui.Update(func(ctx *debugui.Context) error {
+		ctx.Window("Sandbox", image.Rect(0, 0, 100, 100), func(layout debugui.ContainerLayout) {
+			ctx.Text(fmt.Sprintf("FPS: %0.2f", ebiten.ActualFPS()))
+			ctx.Text(fmt.Sprintf("TPS: %0.2f", ebiten.ActualTPS()))
+
+			ctx.Button("Clear Sand").On(func() {
+				g.World.Clear()
+			})
+		})
+		return nil
+	}); err != nil {
+		return err
+	}
 
 	g.mx, g.my = ebiten.CursorPosition()
 
@@ -240,7 +264,10 @@ func (g *Game) Update() error {
 		g.World.Fill(g.mx, g.my)
 	}
 
-	g.World.Update()
+	if ebiten.IsKeyPressed(ebiten.KeyC) {
+		g.World.Clear()
+	}
+
 	g.World.Update()
 	g.World.Update()
 	return nil
@@ -265,8 +292,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		true,
 	)
 
-	msg := fmt.Sprintf("TPS: %0.2f\n", ebiten.ActualTPS())
-	ebitenutil.DebugPrint(screen, msg)
+	g.debugui.Draw(screen)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
