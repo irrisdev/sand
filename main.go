@@ -50,7 +50,15 @@ func drawSquare(grid []bool, width, height, startX, startY, size int) {
 
 func (w *World) Update() {
 	// moves sand down once per tick
-	for i := len(w.area) - 1; i > 0; i-- {
+	for b := len(w.area) - 1; b > 0; b-- {
+
+		i := b
+		if !w.ltr {
+			i = (b/w.width)*w.width + (w.width - 1 - (b % w.width))
+		}
+
+		w.ltr = !w.ltr
+
 		if w.area[i] {
 			next := i + w.width
 			row := next / w.width
@@ -153,7 +161,7 @@ func main() {
 	}
 
 	ebiten.SetWindowSize(960, 540)
-	ebiten.SetWindowTitle("Hello, World!")
+	ebiten.SetWindowTitle("Sand Simulation")
 	if err := ebiten.RunGame(g); err != nil {
 		log.Fatal(err)
 	}
