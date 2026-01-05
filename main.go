@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"log"
+	"math"
 	"math/rand"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
 // World represents the game state.
@@ -31,7 +34,7 @@ func NewWorld(width, height int) *World {
 }
 
 func (w *World) init() {
-	drawSquare(w.area, w.width, w.height, 200, 20, 40)
+	// drawSquare(w.area, w.width, w.height, 200, 20, 100)
 }
 
 func drawSquare(grid []bool, width, height, startX, startY, size int) {
@@ -41,14 +44,43 @@ func drawSquare(grid []bool, width, height, startX, startY, size int) {
 			gy := startY + y
 
 			// Check bounds
-			if gx >= 0 && gx < width && gy >= 0 && gy < height {
-				grid[gy*width+gx] = true
+			if rand.Intn(5) == 1 {
+				if gx >= 0 && gx < width && gy >= 0 && gy < height {
+					grid[gy*width+gx] = true
+				}
 			}
 		}
 	}
 }
 
+func FillCircle(grid []bool, w, h, cx, cy, radius int) {
+	r2 := radius * radius
+
+	for dy := -radius; dy <= radius; dy++ {
+		y := cy + dy
+		if y < 0 || y >= h {
+			continue // skip out-of-bounds
+		}
+
+		dx := int(math.Sqrt(float64(r2 - dy*dy))) // horizontal distance
+
+		for x := cx - dx; x <= cx+dx; x++ {
+			if x < 0 || x >= w {
+				continue // skip out-of-bounds
+			}
+			if rand.Intn(5) == 1 {
+				grid[y*w+x] = true
+			}
+		}
+	}
+}
+
+func (w *World) Fill(x int, y int) {
+	FillCircle(w.area, w.width, w.height, x, y, 15)
+}
+
 func (w *World) Update() {
+
 	// moves sand down once per tick
 	for b := len(w.area) - 1; b > 0; b-- {
 
@@ -103,13 +135,30 @@ func (w *World) Update() {
 }
 
 func (w *World) Draw(px []byte) {
+
 	for i, v := range w.area {
 		if v {
-			px[i*4] = 0xFF
-			px[i*4+1] = 0xFF
-			px[i*4+2] = 0xFF
-			px[i*4+3] = 0xFF
+			// Determine coordinates
+			x := i % w.width
+			y := i / w.width
+
+			// Deterministic light/dark sand pattern
+			if (x+y)%2 == 0 {
+				// Light sand
+				px[i*4] = 0xC2
+				px[i*4+1] = 0xB2
+				px[i*4+2] = 0x80
+				px[i*4+3] = 0xFF
+			} else {
+				// Dark sand
+				px[i*4] = 0xA9
+				px[i*4+1] = 0x91
+				px[i*4+2] = 0x5F
+				px[i*4+3] = 0xFF
+			}
+
 		} else {
+			// Transparent / empty
 			px[i*4] = 0
 			px[i*4+1] = 0
 			px[i*4+2] = 0
@@ -124,9 +173,23 @@ type Game struct {
 
 	// rgba representation of world.area
 	pixels []byte
+
+	// mouse position
+	mx int
+	my int
 }
 
 func (g *Game) Update() error {
+
+	g.mx, g.my = ebiten.CursorPosition()
+
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		g.World.Fill(ebiten.CursorPosition())
+	}
+
+	g.World.Update()
+	g.World.Update()
+	g.World.Update()
 	g.World.Update()
 	return nil
 }
@@ -140,6 +203,15 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.World.Draw(g.pixels)
 
 	screen.WritePixels(g.pixels)
+
+	vector.StrokeCircle(
+		screen,
+		float32(g.mx), float32(g.my),
+		15,
+		2,
+		color.RGBA{140, 140, 140, 1},
+		true,
+	)
 
 	msg := fmt.Sprintf("TPS: %0.2f\n", ebiten.ActualTPS())
 	ebitenutil.DebugPrint(screen, msg)
