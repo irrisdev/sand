@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"log"
 	"math"
+	"math/bits"
 	"math/rand"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -12,137 +13,189 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
-// World represents the game state.
+type Bitset struct {
+	BitArr []uint64
+	Size   int
+}
+
+func NewBitset(size int) *Bitset {
+	// always create with enough space
+	sliceSize := (size + 63) / 64
+	return &Bitset{
+		BitArr: make([]uint64, sliceSize),
+		Size:   size,
+	}
+}
+
+func (bs *Bitset) Set(pos int) {
+	if pos < 0 || pos >= bs.Size {
+		return
+	}
+
+	idx := pos / 64
+	ofs := pos % 64
+
+	bs.BitArr[idx] |= 1 << ofs
+}
+
+func (bs *Bitset) Clear(pos int) {
+	if pos < 0 || pos >= bs.Size {
+		return
+	}
+	idx := pos / 64
+	ofs := pos % 64
+	bs.BitArr[idx] &^= (1 << ofs)
+}
+
+func (bs *Bitset) Test(pos int) bool {
+	if pos < 0 || pos >= bs.Size {
+		return false
+	}
+
+	idx := pos / 64
+	ofs := pos % 64
+
+	return bs.BitArr[idx]&(1<<ofs) != 0
+}
+
+func (bs *Bitset) SetClear(cur int, next int) {
+	bs.Clear(cur)
+	bs.Set(next)
+}
+
 type World struct {
-	area []bool
-	// bitset []uint64
+	bs     *Bitset
 	width  int
 	height int
 	ltr    bool
 }
 
-// NewWorld creates a new world.
 func NewWorld(width, height int) *World {
 	w := &World{
-		area: make([]bool, width*height),
-		// bitset: make([]uint64, width*height/64),
+		bs:     NewBitset(width * height),
 		width:  width,
 		height: height,
 	}
-	w.init()
+	// w.init()
 	return w
 }
 
-func (w *World) init() {
-	// drawSquare(w.area, w.width, w.height, 200, 20, 100)
-}
+// func (w *World) init() {
+// 	w.FillCircle(10, 10, 30)
+// }
 
-func drawSquare(grid []bool, width, height, startX, startY, size int) {
-	for y := 0; y < size; y++ {
-		for x := 0; x < size; x++ {
-			gx := startX + x
-			gy := startY + y
+func (w *World) Update() {
 
-			// Check bounds
-			if rand.Intn(5) == 1 {
-				if gx >= 0 && gx < width && gy >= 0 && gy < height {
-					grid[gy*width+gx] = true
-				}
-			}
+	for b := w.bs.Size - 1; b >= 0; b-- {
+		i := b
+		if !w.ltr {
+			row := b / w.width
+			col := b % w.width
+			i = row*w.width + (w.width - 1 - col)
 		}
+
+		if b%w.width == 0 {
+			w.ltr = !w.ltr
+		}
+
+		if w.bs.Test(i) {
+			next := i + w.width
+			row := next / w.width
+
+			if next > w.bs.Size-1 {
+				continue
+			}
+
+			if !w.bs.Test(next) {
+				w.bs.Clear(i)
+				w.bs.Set(next)
+				continue
+			}
+
+			op := []int{-1, 1}
+			fc := rand.Intn(2)
+			c := op[fc]
+			s := op[1-fc]
+
+			next = i + w.width + c
+			nr := next / w.width
+
+			if next < w.bs.Size-1 && nr == row && !w.bs.Test(next) {
+				w.bs.SetClear(i, next)
+				continue
+			}
+
+			next = i + w.width + s
+			nr = next / w.width
+			if next < w.bs.Size-1 && nr == row && !w.bs.Test(next) {
+				w.bs.SetClear(i, next)
+				continue
+			}
+
+		}
+
 	}
+
 }
 
-func FillCircle(grid []bool, w, h, cx, cy, radius int) {
+func (w *World) FillCircle(cx, cy, radius int) {
 	r2 := radius * radius
 
 	for dy := -radius; dy <= radius; dy++ {
 		y := cy + dy
-		if y < 0 || y >= h {
+		if y < 0 || y >= w.height {
 			continue // skip out-of-bounds
 		}
 
 		dx := int(math.Sqrt(float64(r2 - dy*dy))) // horizontal distance
 
 		for x := cx - dx; x <= cx+dx; x++ {
-			if x < 0 || x >= w {
+			if x < 0 || x >= w.width {
 				continue // skip out-of-bounds
 			}
-			if rand.Intn(5) == 1 {
-				grid[y*w+x] = true
+			if rand.Intn(2) == 1 {
+				pos := y*w.width + x
+				w.bs.Set(pos)
 			}
 		}
 	}
 }
 
-func (w *World) Fill(x int, y int) {
-	FillCircle(w.area, w.width, w.height, x, y, 15)
-}
+func bitsOn(x uint64) []int {
+	pos := make([]int, 0)
 
-func (w *World) Update() {
-
-	// moves sand down once per tick
-	for b := len(w.area) - 1; b > 0; b-- {
-
-		i := b
-		if !w.ltr {
-			i = (b/w.width)*w.width + (w.width - 1 - (b % w.width))
-		}
-
-		w.ltr = !w.ltr
-
-		if w.area[i] {
-			next := i + w.width
-			row := next / w.width
-
-			if next > len(w.area)-1 {
-				continue
-			}
-
-			// 1. check if cell below is free
-			if !w.area[next] {
-				w.area[i] = false
-				w.area[next] = true
-				continue
-			}
-			options := []int{-1, 1}
-			firstIndex := rand.Intn(2) // 0 or 1
-			first := options[firstIndex]
-
-			// right
-			next = i + w.width + first
-			nr := next / w.width
-			if next < len(w.area)-1 && nr == row && !w.area[next] {
-				w.area[i] = false
-				w.area[next] = true
-				continue
-
-			}
-			// 2. check if right cell is free
-
-			// 3. check if left cell is free
-			next = i + w.width - options[1-firstIndex]
-			nr = next / w.width
-
-			if next < len(w.area)-1 && nr == row && !w.area[next] {
-				w.area[i] = false
-				w.area[next] = true
-				continue
-
-			}
-		}
+	for x != 0 {
+		tz := bits.TrailingZeros64(x)
+		pos = append(pos, tz)
+		x &= x - 1
 	}
+
+	return pos
 }
 
 func (w *World) Draw(px []byte) {
+	// for i, v := range w.bs.BitArr {
+	// 	if v != 0 {
+	// 		for _, j := range bitsOn(v) {
+	// 			index := i*64 + j
+	// 			row := index / w.width
+	// 			col := index % w.width
 
-	for i, v := range w.area {
-		if v {
-			// Determine coordinates
+	// px[row*col*4] = 0xC2
+	// px[row*col*4+1] = 0xB2
+	// px[row*col*4+2] = 0x80
+	// px[row*col*4+3] = 0xFF
+	// 		}
+	// 	}
+
+	// }
+
+	for i := 0; i < w.bs.Size; i++ {
+		if w.bs.Test(i) {
+
 			x := i % w.width
 			y := i / w.width
 
-			// Deterministic light/dark sand pattern
 			if (x+y)%2 == 0 {
 				// Light sand
 				px[i*4] = 0xC2
@@ -158,7 +211,6 @@ func (w *World) Draw(px []byte) {
 			}
 
 		} else {
-			// Transparent / empty
 			px[i*4] = 0
 			px[i*4+1] = 0
 			px[i*4+2] = 0
@@ -167,11 +219,12 @@ func (w *World) Draw(px []byte) {
 	}
 }
 
-type Game struct {
-	// logic
-	World *World
+func (w *World) Fill(x int, y int) {
+	w.FillCircle(x, y, 15)
+}
 
-	// rgba representation of world.area
+type Game struct {
+	World  *World
 	pixels []byte
 
 	// mouse position
@@ -184,10 +237,9 @@ func (g *Game) Update() error {
 	g.mx, g.my = ebiten.CursorPosition()
 
 	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		g.World.Fill(ebiten.CursorPosition())
+		g.World.Fill(g.mx, g.my)
 	}
 
-	g.World.Update()
 	g.World.Update()
 	g.World.Update()
 	g.World.Update()
