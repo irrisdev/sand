@@ -159,7 +159,7 @@ func (w *World) FillCircle(cx, cy, radius int) {
 			if x < 0 || x >= w.width {
 				continue // skip out-of-bounds
 			}
-			if rand.Intn(2) == 1 {
+			if rand.Intn(4) == 1 {
 				pos := y*w.width + x
 				w.bs.Set(pos)
 			}
@@ -268,6 +268,7 @@ func (g *Game) Update() error {
 		g.World.Clear()
 	}
 
+	g.World.Update()
 	g.World.Update()
 	g.World.Update()
 	return nil
